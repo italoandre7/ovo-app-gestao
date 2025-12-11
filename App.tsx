@@ -10,8 +10,8 @@ import { Expenses } from './components/Expenses';
 import { ProductionView } from './components/Production';
 import { Sales } from './components/Sales';
 import { Button } from './components/ui/Button';
-import { ConfigModal } from './components/ConfigModal'; // New Import
-import { Egg, Loader2, Info, Settings, Database } from 'lucide-react';
+// ConfigModal removed
+import { Egg, Loader2, Info, Settings, LogIn, UserPlus, AlertCircle } from 'lucide-react';
 
 // Default mock data for Demo Mode
 const MOCK_EXPENSES: Expense[] = [
@@ -47,7 +47,12 @@ export default function App() {
   const [production, setProduction] = useState<Production[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+
+  // Login State
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Authentication Effect
   useEffect(() => {
@@ -108,36 +113,57 @@ export default function App() {
       };
     } catch (error) {
       console.error("Error setting up listeners:", error);
-      // If listeners fail (e.g., permissions or deleted DB), fall back safely
       setContext(prev => ({ ...prev, isDemoMode: true }));
     }
   }, [context.userId, context.isDemoMode, context.db]);
 
-  // Handlers
-  const handleLogin = async () => {
+  // Auth Handlers
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
+    setAuthError(null);
+
     try {
-      await firebaseService.signIn();
-    } catch (e) {
-      console.error(e);
-      setContext(prev => ({ ...prev, isDemoMode: true, userId: 'demo-user' }));
-    } finally {
+      if (isRegistering) {
+        await firebaseService.register(email, password);
+      } else {
+        await firebaseService.login(email, password);
+      }
+      // Auth state listener in useEffect will handle the transition
+    } catch (err: any) {
+      console.error(err);
+      let msg = "Erro na autenticação.";
+      if (err.code === 'auth/invalid-credential') msg = "E-mail ou senha incorretos.";
+      if (err.code === 'auth/email-already-in-use') msg = "Este e-mail já está em uso.";
+      if (err.code === 'auth/weak-password') msg = "A senha deve ter pelo menos 6 caracteres.";
+      if (err.message.includes("not configured")) msg = "Banco de dados não configurado (Modo Demo indisponível para login real).";
+      
+      setAuthError(msg);
       setLoading(false);
     }
   };
 
+  const handleDemoAccess = () => {
+    setContext(prev => ({ ...prev, isDemoMode: true, userId: 'demo-user' }));
+  };
+
   const handleLogout = async () => {
+    setLoading(true);
     if (!context.isDemoMode) await firebaseService.logout();
-    setContext(prev => ({ ...prev, userId: null }));
+    setContext(prev => ({ ...prev, userId: null, isDemoMode: false }));
+    // Reset form state
+    setEmail('');
+    setPassword('');
+    setLoading(false);
   };
 
   const handleResetConfig = () => {
-    if(window.confirm("Isso desconectará o banco de dados atual. Deseja continuar?")) {
+    if(window.confirm("Isso limpará a configuração do banco de dados deste navegador. Continuar?")) {
       firebaseService.resetConfig();
     }
   }
 
-  // Add Data Handlers
+  // Data Handlers (Same as before)
   const addExpense = async (data: any) => {
     if (context.isDemoMode) {
       const newExp = { ...data, id: Math.random().toString(), user_id: 'demo', date: new Date(data.date) };
@@ -201,55 +227,105 @@ export default function App() {
    }
  };
 
-  // Login Screen
+  // --- LOGIN SCREEN ---
   if (!context.userId) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 space-y-6 text-center">
-          <div className="flex justify-center">
-            <div className="p-4 bg-emerald-100 rounded-full">
-              <Egg className="w-12 h-12 text-emerald-600" />
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 space-y-6">
+          <div className="text-center space-y-2">
+            <div className="flex justify-center">
+              <div className="p-4 bg-emerald-100 rounded-full">
+                <Egg className="w-12 h-12 text-emerald-600" />
+              </div>
             </div>
+            <h1 className="text-3xl font-bold text-gray-900">OvoApp</h1>
+            <p className="text-gray-500">Gestão profissional para sua produção.</p>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">OvoApp</h1>
-          <p className="text-gray-500">Gestão profissional para sua produção de ovos.</p>
-          
-          <div className="space-y-4">
-             {loading ? (
-                <Button className="w-full" disabled>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Entrando...
-                </Button>
-             ) : (
-                <div className="space-y-3">
-                  <Button className="w-full py-3 text-lg" onClick={handleLogin}>
-                    {context.isDemoMode ? 'Entrar (Modo Demo)' : 'Acessar Sistema'}
-                  </Button>
-                  
-                  <Button 
-                    variant="secondary" 
-                    className="w-full text-sm" 
-                    onClick={() => setIsConfigModalOpen(true)}
-                    icon={Database}
-                  >
-                    {context.isDemoMode ? 'Configurar Banco de Dados' : 'Alterar Configuração'}
-                  </Button>
+
+          {!firebaseService.isConfigured ? (
+             /* NO CONFIG STATE */
+             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
+               <AlertCircle className="w-8 h-8 text-yellow-600 mx-auto mb-2" />
+               <h3 className="text-yellow-800 font-semibold mb-1">Configuração Necessária</h3>
+               <p className="text-yellow-700 text-sm mb-4">
+                 O banco de dados não foi detectado. O login real não funcionará.
+               </p>
+               <Button onClick={handleDemoAccess} className="w-full">
+                 Acessar Modo Demo (Offline)
+               </Button>
+               <p className="mt-4 text-xs text-gray-400">
+                 Dica: Configure o firebase no código ou localstorage.
+               </p>
+             </div>
+          ) : (
+            /* LOGIN FORM */
+            <form onSubmit={handleAuthSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">E-mail</label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-emerald-500 focus:border-emerald-500"
+                  placeholder="seu@email.com"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Senha</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-emerald-500 focus:border-emerald-500"
+                  placeholder="********"
+                />
+              </div>
+
+              {authError && (
+                <div className="bg-red-50 text-red-700 text-sm p-3 rounded flex items-center">
+                  <AlertCircle className="w-4 h-4 mr-2 flex-shrink-0" />
+                  {authError}
                 </div>
-             )}
-          </div>
-          
-          {context.isDemoMode && (
-            <div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg text-sm flex items-center justify-center">
-              <Info className="w-4 h-4 mr-2" />
-              Modo Demo (Dados Locais)
-            </div>
+              )}
+
+              <Button type="submit" className="w-full py-2.5" isLoading={loading}>
+                 {isRegistering ? (
+                   <><UserPlus className="w-4 h-4 mr-2" /> Criar Conta</>
+                 ) : (
+                   <><LogIn className="w-4 h-4 mr-2" /> Entrar</>
+                 )}
+              </Button>
+
+              <div className="flex items-center justify-between text-sm mt-4">
+                <button 
+                  type="button" 
+                  onClick={() => handleDemoAccess()}
+                  className="text-gray-500 hover:text-gray-700 underline"
+                >
+                  Entrar sem conta (Demo)
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setIsRegistering(!isRegistering);
+                    setAuthError(null);
+                  }}
+                  className="text-emerald-600 hover:text-emerald-700 font-medium"
+                >
+                  {isRegistering ? 'Já tenho conta' : 'Criar nova conta'}
+                </button>
+              </div>
+            </form>
           )}
         </div>
-        
-        <ConfigModal isOpen={isConfigModalOpen} onClose={() => setIsConfigModalOpen(false)} />
       </div>
     );
   }
 
+  // --- MAIN APP ---
   return (
     <Layout 
       view={view} 
@@ -261,7 +337,7 @@ export default function App() {
       <div className="flex justify-end mb-4 md:hidden">
          {!context.isDemoMode && (
            <button onClick={handleResetConfig} className="text-xs text-gray-400 hover:text-red-500 flex items-center">
-             <Settings className="w-3 h-3 mr-1" /> Config
+             <Settings className="w-3 h-3 mr-1" /> Reset DB
            </button>
          )}
       </div>
