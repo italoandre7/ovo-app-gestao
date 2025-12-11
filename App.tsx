@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   collection, query, onSnapshot, addDoc, deleteDoc, doc, Timestamp 
 } from 'firebase/firestore';
@@ -10,7 +10,8 @@ import { Expenses } from './components/Expenses';
 import { ProductionView } from './components/Production';
 import { Sales } from './components/Sales';
 import { Button } from './components/ui/Button';
-import { Egg, Loader2, Info } from 'lucide-react';
+import { ConfigModal } from './components/ConfigModal'; // New Import
+import { Egg, Loader2, Info, Settings, Database } from 'lucide-react';
 
 // Default mock data for Demo Mode
 const MOCK_EXPENSES: Expense[] = [
@@ -46,6 +47,7 @@ export default function App() {
   const [production, setProduction] = useState<Production[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
 
   // Authentication Effect
   useEffect(() => {
@@ -65,46 +67,50 @@ export default function App() {
     if (!context.userId) return;
 
     if (context.isDemoMode) {
-      // Load Mock Data
       setExpenses(MOCK_EXPENSES);
       setProduction(MOCK_PRODUCTION);
       setSales(MOCK_SALES);
       return;
     }
 
-    // Load Firebase Data
-    const expensesRef = collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/production_expenses`);
-    const productionRef = collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/egg_production`);
-    const salesRef = collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/sales`);
+    try {
+      const expensesRef = collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/production_expenses`);
+      const productionRef = collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/egg_production`);
+      const salesRef = collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/sales`);
 
-    const sortByDateDesc = (data: any[]) => {
-      return data.sort((a, b) => {
-        const dateA = a.date instanceof Timestamp ? a.date.toMillis() : new Date(a.date).getTime();
-        const dateB = b.date instanceof Timestamp ? b.date.toMillis() : new Date(b.date).getTime();
-        return dateB - dateA;
+      const sortByDateDesc = (data: any[]) => {
+        return data.sort((a, b) => {
+          const dateA = a.date instanceof Timestamp ? a.date.toMillis() : new Date(a.date).getTime();
+          const dateB = b.date instanceof Timestamp ? b.date.toMillis() : new Date(b.date).getTime();
+          return dateB - dateA;
+        });
+      };
+
+      const unsubExpenses = onSnapshot(query(expensesRef), (snap) => {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
+        setExpenses(sortByDateDesc(data));
       });
-    };
 
-    const unsubExpenses = onSnapshot(query(expensesRef), (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
-      setExpenses(sortByDateDesc(data));
-    });
+      const unsubProduction = onSnapshot(query(productionRef), (snap) => {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Production));
+        setProduction(sortByDateDesc(data));
+      });
 
-    const unsubProduction = onSnapshot(query(productionRef), (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Production));
-      setProduction(sortByDateDesc(data));
-    });
+      const unsubSales = onSnapshot(query(salesRef), (snap) => {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale));
+        setSales(sortByDateDesc(data));
+      });
 
-    const unsubSales = onSnapshot(query(salesRef), (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale));
-      setSales(sortByDateDesc(data));
-    });
-
-    return () => {
-      unsubExpenses();
-      unsubProduction();
-      unsubSales();
-    };
+      return () => {
+        unsubExpenses();
+        unsubProduction();
+        unsubSales();
+      };
+    } catch (error) {
+      console.error("Error setting up listeners:", error);
+      // If listeners fail (e.g., permissions or deleted DB), fall back safely
+      setContext(prev => ({ ...prev, isDemoMode: true }));
+    }
   }, [context.userId, context.isDemoMode, context.db]);
 
   // Handlers
@@ -114,7 +120,6 @@ export default function App() {
       await firebaseService.signIn();
     } catch (e) {
       console.error(e);
-      // Fallback to demo mode if auth fails (e.g. no internet/config)
       setContext(prev => ({ ...prev, isDemoMode: true, userId: 'demo-user' }));
     } finally {
       setLoading(false);
@@ -125,6 +130,12 @@ export default function App() {
     if (!context.isDemoMode) await firebaseService.logout();
     setContext(prev => ({ ...prev, userId: null }));
   };
+
+  const handleResetConfig = () => {
+    if(window.confirm("Isso desconectará o banco de dados atual. Deseja continuar?")) {
+      firebaseService.resetConfig();
+    }
+  }
 
   // Add Data Handlers
   const addExpense = async (data: any) => {
@@ -209,19 +220,32 @@ export default function App() {
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Entrando...
                 </Button>
              ) : (
-                <Button className="w-full py-3 text-lg" onClick={handleLogin}>
-                  Acessar Sistema
-                </Button>
+                <div className="space-y-3">
+                  <Button className="w-full py-3 text-lg" onClick={handleLogin}>
+                    {context.isDemoMode ? 'Entrar (Modo Demo)' : 'Acessar Sistema'}
+                  </Button>
+                  
+                  <Button 
+                    variant="secondary" 
+                    className="w-full text-sm" 
+                    onClick={() => setIsConfigModalOpen(true)}
+                    icon={Database}
+                  >
+                    {context.isDemoMode ? 'Configurar Banco de Dados' : 'Alterar Configuração'}
+                  </Button>
+                </div>
              )}
           </div>
           
           {context.isDemoMode && (
             <div className="bg-yellow-50 text-yellow-800 p-3 rounded-lg text-sm flex items-center justify-center">
               <Info className="w-4 h-4 mr-2" />
-              Ambiente de Demonstração (Sem Banco de Dados)
+              Modo Demo (Dados Locais)
             </div>
           )}
         </div>
+        
+        <ConfigModal isOpen={isConfigModalOpen} onClose={() => setIsConfigModalOpen(false)} />
       </div>
     );
   }
@@ -234,6 +258,14 @@ export default function App() {
       userId={context.userId}
       isDemoMode={context.isDemoMode}
     >
+      <div className="flex justify-end mb-4 md:hidden">
+         {!context.isDemoMode && (
+           <button onClick={handleResetConfig} className="text-xs text-gray-400 hover:text-red-500 flex items-center">
+             <Settings className="w-3 h-3 mr-1" /> Config
+           </button>
+         )}
+      </div>
+
       {view === 'dashboard' && <Dashboard expenses={expenses} productionRecords={production} sales={sales} />}
       {view === 'sales' && <Sales sales={sales} onAdd={addSale} onDelete={deleteSale} />}
       {view === 'production' && <ProductionView records={production} onAdd={addProduction} onDelete={deleteProduction} />}

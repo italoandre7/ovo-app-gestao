@@ -2,42 +2,42 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
-// Declare globals injected by the environment if applicable
-declare const __app_id: string;
-declare const __firebase_config: string;
+const STORAGE_KEY = 'ovoapp_firebase_config';
 
 let app;
 let db: any = null;
 let auth: any = null;
 let isConfigured = false;
 
+// 1. Try to load from LocalStorage (Dynamic Configuration)
 try {
-  const configStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+  const storedConfig = localStorage.getItem(STORAGE_KEY);
   
-  if (configStr) {
-    const firebaseConfig = JSON.parse(configStr);
+  if (storedConfig) {
+    const firebaseConfig = JSON.parse(storedConfig);
     app = initializeApp(firebaseConfig);
     db = getFirestore(app);
     auth = getAuth(app);
     isConfigured = true;
   } else {
-    console.warn("Firebase config not found. Running in Demo Mode.");
+    console.log("No Firebase config found in storage. Running in Demo Mode.");
   }
 } catch (e) {
-  console.error("Error initializing Firebase:", e);
+  console.error("Error initializing Firebase from storage:", e);
+  localStorage.removeItem(STORAGE_KEY); // Clear bad config
 }
 
 export const firebaseService = {
   db,
   auth,
   isConfigured,
-  appId: typeof __app_id !== 'undefined' ? __app_id : 'default-app',
+  appId: 'ovoapp-production',
   
   // Helper to handle Auth
   initAuth: (callback: (user: User | null) => void) => {
     if (!auth) {
       // Immediate callback for demo mode
-      callback({ uid: 'demo-user', isAnonymous: true } as User); 
+      setTimeout(() => callback({ uid: 'demo-user', isAnonymous: true } as User), 500);
       return () => {};
     }
     return onAuthStateChanged(auth, callback);
@@ -51,5 +51,26 @@ export const firebaseService = {
   logout: async () => {
     if (!auth) return;
     return signOut(auth);
+  },
+
+  // Configuration Methods
+  saveConfig: (configJson: string) => {
+    try {
+      // Validate JSON
+      const config = JSON.parse(configJson);
+      if (!config.apiKey || !config.projectId) {
+        throw new Error("Configuração inválida. Verifique se o JSON contém apiKey e projectId.");
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+      window.location.reload(); // Reload to initialize firebase
+      return true;
+    } catch (e) {
+      throw e;
+    }
+  },
+
+  resetConfig: () => {
+    localStorage.removeItem(STORAGE_KEY);
+    window.location.reload();
   }
 };
