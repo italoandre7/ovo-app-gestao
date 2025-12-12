@@ -131,12 +131,39 @@ export default function App() {
       }
       // Auth state listener in useEffect will handle the transition
     } catch (err: any) {
-      console.error(err);
-      let msg = "Erro na autenticação.";
-      if (err.code === 'auth/invalid-credential') msg = "E-mail ou senha incorretos.";
-      if (err.code === 'auth/email-already-in-use') msg = "Este e-mail já está em uso.";
-      if (err.code === 'auth/weak-password') msg = "A senha deve ter pelo menos 6 caracteres.";
-      if (err.message.includes("not configured")) msg = "Banco de dados não configurado (Modo Demo indisponível para login real).";
+      console.error("Firebase Auth Error:", err);
+      let msg = "Erro desconhecido na autenticação.";
+      
+      // Better Error Handling
+      switch (err.code) {
+        case 'auth/invalid-credential':
+        case 'auth/user-not-found':
+        case 'auth/wrong-password':
+          msg = "E-mail ou senha incorretos.";
+          break;
+        case 'auth/email-already-in-use':
+          msg = "Este e-mail já está cadastrado. Tente fazer login.";
+          break;
+        case 'auth/weak-password':
+          msg = "A senha é muito fraca. Use pelo menos 6 caracteres.";
+          break;
+        case 'auth/invalid-email':
+          msg = "O formato do e-mail é inválido.";
+          break;
+        case 'auth/operation-not-allowed':
+          msg = "O login por E-mail/Senha não está ativado no Console do Firebase.";
+          break;
+        case 'auth/network-request-failed':
+          msg = "Erro de conexão. Verifique sua internet.";
+          break;
+        default:
+          // Fallback to show the raw message if it's something specific
+          if (err.message) msg = `Erro: ${err.message}`;
+      }
+
+      if (err.message && err.message.includes("not configured")) {
+        msg = "Banco de dados não configurado (Modo Demo indisponível para login real).";
+      }
       
       setAuthError(msg);
       setLoading(false);
@@ -285,9 +312,9 @@ export default function App() {
               </div>
 
               {authError && (
-                <div className="bg-red-50 text-red-700 text-sm p-3 rounded flex items-center">
-                  <AlertCircle className="w-4 h-4 mr-2 flex-shrink-0" />
-                  {authError}
+                <div className="bg-red-50 text-red-700 text-sm p-3 rounded flex items-start">
+                  <AlertCircle className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" />
+                  <span>{authError}</span>
                 </div>
               )}
 

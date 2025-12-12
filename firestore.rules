@@ -1,0 +1,16 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Regra genérica: bloqueia tudo por padrão
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Regra específica para o App
+    match /artifacts/ovoapp-production/users/{userId}/{document=**} {
+      // Permite ler e escrever se o usuário estiver logado E 
+      // o ID do usuário logado for igual ao ID da pasta (userId)
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

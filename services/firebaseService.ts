@@ -16,22 +16,32 @@ let db: any = null;
 let auth: any = null;
 let isConfigured = false;
 
-// Tenta carregar configuração do LocalStorage (caso tenha sido salva anteriormente)
-// OU usa variáveis de ambiente se disponíveis (Recomendado para Netlify)
+// --- ÁREA DE CONFIGURAÇÃO ---
+// 1. Vá ao console do Firebase (https://console.firebase.google.com/)
+// 2. Crie um projeto, adicione um App Web e copie as configurações.
+// 3. Cole os valores abaixo:
+const hardcodedConfig = {
+  apiKey: "PREENCHA_SUA_API_KEY_AQUI", // Ex: "AIzaSyD..."
+  authDomain: "PREENCHA_SEU_PROJETO.firebaseapp.com",
+  projectId: "PREENCHA_SEU_PROJECT_ID",
+  storageBucket: "PREENCHA_SEU_PROJETO.appspot.com",
+  messagingSenderId: "PREENCHA_SEU_MESSAGING_SENDER_ID",
+  appId: "PREENCHA_SEU_APP_ID"
+};
+// ----------------------------
+
 try {
   const storedConfig = localStorage.getItem(STORAGE_KEY);
-  
-  // SE PRECISAR HARDCODAR A CONFIGURAÇÃO, SUBSTITUA O null ABAIXO PELO SEU OBJETO DE CONFIGURAÇÃO:
-  // Exemplo: const hardcodedConfig = { apiKey: "...", ... };
-  const hardcodedConfig = null; 
-
   let configToUse = null;
 
-  if (hardcodedConfig) {
+  // Verifica se o hardcodedConfig foi preenchido pelo usuário (não contém o texto padrão)
+  const isHardcodedConfigured = hardcodedConfig.apiKey !== "PREENCHA_SUA_API_KEY_AQUI";
+
+  if (isHardcodedConfigured) {
     configToUse = hardcodedConfig;
   } else if (storedConfig) {
     configToUse = JSON.parse(storedConfig);
-  } else if (process.env.REACT_APP_FIREBASE_API_KEY) {
+  } else if (typeof process !== 'undefined' && process.env && process.env.REACT_APP_FIREBASE_API_KEY) {
      // Fallback para variáveis de ambiente padrão do Create React App/Vite se configuradas
     configToUse = {
       apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
@@ -48,8 +58,9 @@ try {
     db = getFirestore(app);
     auth = getAuth(app);
     isConfigured = true;
+    console.log("Firebase inicializado com sucesso.");
   } else {
-    console.log("Nenhuma configuração Firebase encontrada.");
+    console.log("Nenhuma configuração Firebase válida encontrada. O App iniciará em modo Demo/Offline.");
   }
 } catch (e) {
   console.error("Erro ao inicializar Firebase:", e);
@@ -65,8 +76,7 @@ export const firebaseService = {
   initAuth: (callback: (user: User | null) => void) => {
     if (!auth) {
       // Se não estiver configurado, simula um delay e retorna null (não logado)
-      // Se quiser manter o modo demo automático, descomente a linha abaixo:
-      // setTimeout(() => callback({ uid: 'demo-user', isAnonymous: true } as User), 500);
+      // O App.tsx detectará !isConfigured e mostrará o aviso
       setTimeout(() => callback(null), 500);
       return () => {};
     }
@@ -90,8 +100,7 @@ export const firebaseService = {
     return signOut(auth);
   },
 
-  // Mantido caso precise injetar config via console ou código futuro, 
-  // mas o botão UI foi removido no App.tsx
+  // Mantido caso precise injetar config via console ou código futuro
   saveConfig: (configJson: string) => {
     try {
       const config = JSON.parse(configJson);
