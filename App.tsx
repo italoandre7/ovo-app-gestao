@@ -1,8 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  collection, query, onSnapshot, addDoc, deleteDoc, doc, Timestamp 
-} from 'firebase/firestore';
-import { firebaseService } from './services/firebaseService';
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabaseService } from './services/supabaseService';
 import { Expense, Production, Sale, ViewState, AppContextType } from './types';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
@@ -10,36 +7,30 @@ import { Expenses } from './components/Expenses';
 import { ProductionView } from './components/Production';
 import { Sales } from './components/Sales';
 import { Button } from './components/ui/Button';
-// ConfigModal removed
-import { Egg, Loader2, Info, Settings, LogIn, UserPlus, AlertCircle } from 'lucide-react';
+import { Egg, Loader2, Info, Settings, LogIn, UserPlus, AlertCircle, Database } from 'lucide-react';
+import { Modal } from './components/ui/Modal';
 
-// Default mock data for Demo Mode
+// --- MOCK DATA FOR DEMO MODE ---
 const MOCK_EXPENSES: Expense[] = [
   { id: '1', user_id: 'demo', type: 'Ração', description: 'Ração Postura Premium', cost: 150.00, date: new Date('2023-10-01') },
   { id: '2', user_id: 'demo', type: 'Medicamento', description: 'Vitaminas', cost: 45.50, date: new Date('2023-10-05') },
   { id: '3', user_id: 'demo', type: 'Outro', description: 'Reparo Cerca', cost: 80.00, date: new Date('2023-10-10') },
 ];
-
 const MOCK_PRODUCTION: Production[] = [
   { id: '1', user_id: 'demo', date: new Date('2023-10-01'), eggs_produced: 120, feed_consumed_kg: 15 },
   { id: '2', user_id: 'demo', date: new Date('2023-10-02'), eggs_produced: 115, feed_consumed_kg: 14.5 },
-  { id: '3', user_id: 'demo', date: new Date('2023-10-03'), eggs_produced: 130, feed_consumed_kg: 16 },
-  { id: '4', user_id: 'demo', date: new Date('2023-10-04'), eggs_produced: 125, feed_consumed_kg: 15 },
 ];
-
 const MOCK_SALES: Sale[] = [
   { id: '1', user_id: 'demo', date: new Date('2023-10-01'), quantity: 100, value: 80.00, client: 'Mercado A' },
   { id: '2', user_id: 'demo', date: new Date('2023-10-02'), quantity: 90, value: 72.00, client: 'Cliente Balcão' },
-  { id: '3', user_id: 'demo', date: new Date('2023-10-03'), quantity: 120, value: 96.00, client: 'Mercado B' },
 ];
 
 export default function App() {
   const [context, setContext] = useState<AppContextType>({
-    db: firebaseService.db,
-    auth: firebaseService.auth,
+    client: supabaseService.client,
     userId: null,
     isAuthReady: false,
-    isDemoMode: !firebaseService.isConfigured
+    isDemoMode: !supabaseService.isConfigured
   });
   
   const [view, setView] = useState<ViewState>('dashboard');
@@ -48,76 +39,73 @@ export default function App() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Login State
+  // Login/Config State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [configJson, setConfigJson] = useState('');
 
-  // Authentication Effect
+  // 1. Auth Init
   useEffect(() => {
-    const unsubscribe = firebaseService.initAuth((user) => {
-      if (user) {
-        setContext(prev => ({ ...prev, userId: user.uid, isAuthReady: true }));
-      } else {
-        setContext(prev => ({ ...prev, userId: null, isAuthReady: true }));
-      }
+    const { unsubscribe } = supabaseService.initAuth((user) => {
+      setContext(prev => ({ 
+        ...prev, 
+        userId: user ? user.id : null, 
+        isAuthReady: true,
+        // If we have a user, we are definitely not in demo mode (unless forced)
+        isDemoMode: !supabaseService.isConfigured 
+      }));
       setLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  // Data Loading Effect
-  useEffect(() => {
-    if (!context.userId) return;
+  // 2. Data Fetching
+  const fetchData = useCallback(async () => {
+    if (!context.userId || context.isDemoMode || !supabaseService.client) return;
 
-    if (context.isDemoMode) {
+    try {
+      setLoading(true);
+      const supabase = supabaseService.client;
+
+      // Parallel fetching
+      const [expRes, prodRes, salesRes] = await Promise.all([
+        supabase.from('expenses').select('*').order('date', { ascending: false }),
+        supabase.from('egg_production').select('*').order('date', { ascending: false }),
+        supabase.from('sales').select('*').order('date', { ascending: false })
+      ]);
+
+      if (expRes.error) throw expRes.error;
+      if (prodRes.error) throw prodRes.error;
+      if (salesRes.error) throw salesRes.error;
+
+      // Normalize dates (Supabase sends strings)
+      setExpenses(expRes.data.map((d: any) => ({ ...d, date: new Date(d.date) })));
+      setProduction(prodRes.data.map((d: any) => ({ ...d, date: new Date(d.date) })));
+      setSales(salesRes.data.map((d: any) => ({ ...d, date: new Date(d.date) })));
+
+    } catch (err) {
+      console.error("Erro ao buscar dados:", err);
+      alert("Erro ao buscar dados. Verifique se você rodou o Script SQL no Supabase.");
+    } finally {
+      setLoading(false);
+    }
+  }, [context.userId, context.isDemoMode]);
+
+  useEffect(() => {
+    if (context.userId && !context.isDemoMode) {
+      fetchData();
+    } else if (context.isDemoMode) {
       setExpenses(MOCK_EXPENSES);
       setProduction(MOCK_PRODUCTION);
       setSales(MOCK_SALES);
-      return;
+      setLoading(false);
     }
+  }, [context.userId, context.isDemoMode, fetchData]);
 
-    try {
-      const expensesRef = collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/production_expenses`);
-      const productionRef = collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/egg_production`);
-      const salesRef = collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/sales`);
-
-      const sortByDateDesc = (data: any[]) => {
-        return data.sort((a, b) => {
-          const dateA = a.date instanceof Timestamp ? a.date.toMillis() : new Date(a.date).getTime();
-          const dateB = b.date instanceof Timestamp ? b.date.toMillis() : new Date(b.date).getTime();
-          return dateB - dateA;
-        });
-      };
-
-      const unsubExpenses = onSnapshot(query(expensesRef), (snap) => {
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
-        setExpenses(sortByDateDesc(data));
-      });
-
-      const unsubProduction = onSnapshot(query(productionRef), (snap) => {
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Production));
-        setProduction(sortByDateDesc(data));
-      });
-
-      const unsubSales = onSnapshot(query(salesRef), (snap) => {
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale));
-        setSales(sortByDateDesc(data));
-      });
-
-      return () => {
-        unsubExpenses();
-        unsubProduction();
-        unsubSales();
-      };
-    } catch (error) {
-      console.error("Error setting up listeners:", error);
-      setContext(prev => ({ ...prev, isDemoMode: true }));
-    }
-  }, [context.userId, context.isDemoMode, context.db]);
-
-  // Auth Handlers
+  // Auth Actions
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -125,136 +113,124 @@ export default function App() {
 
     try {
       if (isRegistering) {
-        await firebaseService.register(email, password);
+        await supabaseService.register(email, password);
+        alert("Cadastro realizado! Verifique seu e-mail para confirmar a conta (se configurado) ou faça login.");
+        setIsRegistering(false); // Switch to login
       } else {
-        await firebaseService.login(email, password);
+        await supabaseService.login(email, password);
       }
-      // Auth state listener in useEffect will handle the transition
     } catch (err: any) {
-      console.error("Firebase Auth Error:", err);
-      let msg = "Erro desconhecido na autenticação.";
-      
-      // Better Error Handling
-      switch (err.code) {
-        case 'auth/invalid-credential':
-        case 'auth/user-not-found':
-        case 'auth/wrong-password':
-          msg = "E-mail ou senha incorretos.";
-          break;
-        case 'auth/email-already-in-use':
-          msg = "Este e-mail já está cadastrado. Tente fazer login.";
-          break;
-        case 'auth/weak-password':
-          msg = "A senha é muito fraca. Use pelo menos 6 caracteres.";
-          break;
-        case 'auth/invalid-email':
-          msg = "O formato do e-mail é inválido.";
-          break;
-        case 'auth/operation-not-allowed':
-          msg = "O login por E-mail/Senha não está ativado no Console do Firebase.";
-          break;
-        case 'auth/network-request-failed':
-          msg = "Erro de conexão. Verifique sua internet.";
-          break;
-        default:
-          // Fallback to show the raw message if it's something specific
-          if (err.message) msg = `Erro: ${err.message}`;
-      }
-
-      if (err.message && err.message.includes("not configured")) {
-        msg = "Banco de dados não configurado (Modo Demo indisponível para login real).";
-      }
-      
+      console.error("Supabase Auth Error:", err);
+      let msg = err.message || "Erro na autenticação";
+      if (msg.includes("Invalid login")) msg = "Email ou senha incorretos.";
       setAuthError(msg);
+    } finally {
       setLoading(false);
     }
   };
 
-  const handleDemoAccess = () => {
-    setContext(prev => ({ ...prev, isDemoMode: true, userId: 'demo-user' }));
-  };
-
   const handleLogout = async () => {
     setLoading(true);
-    if (!context.isDemoMode) await firebaseService.logout();
-    setContext(prev => ({ ...prev, userId: null, isDemoMode: false }));
-    // Reset form state
+    if (!context.isDemoMode) await supabaseService.logout();
+    setContext(prev => ({ ...prev, userId: null }));
     setEmail('');
     setPassword('');
     setLoading(false);
   };
 
-  const handleResetConfig = () => {
-    if(window.confirm("Isso limpará a configuração do banco de dados deste navegador. Continuar?")) {
-      firebaseService.resetConfig();
-    }
-  }
-
-  // Data Handlers (Same as before)
+  // CRUD Actions
   const addExpense = async (data: any) => {
     if (context.isDemoMode) {
       const newExp = { ...data, id: Math.random().toString(), user_id: 'demo', date: new Date(data.date) };
       setExpenses(prev => [newExp, ...prev].sort((a,b) => b.date.getTime() - a.date.getTime()));
-    } else {
-      await addDoc(collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/production_expenses`), {
-        ...data,
-        user_id: context.userId,
-        date: Timestamp.fromDate(new Date(data.date))
-      });
+      return;
     }
+    const supabase = supabaseService.client;
+    // Insert and ignore return (or select single). For simplicity, we refetch or push optimistically
+    const { error } = await supabase.from('expenses').insert([{
+      user_id: context.userId,
+      type: data.type,
+      description: data.description,
+      cost: data.cost,
+      date: data.date // Send string YYYY-MM-DD
+    }]);
+
+    if (error) { alert("Erro ao salvar: " + error.message); return; }
+    fetchData(); // Refresh data
   };
 
   const deleteExpense = async (id: string) => {
     if (context.isDemoMode) {
       setExpenses(prev => prev.filter(e => e.id !== id));
-    } else {
-      await deleteDoc(doc(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/production_expenses`, id));
+      return;
     }
+    const { error } = await supabaseService.client.from('expenses').delete().eq('id', id);
+    if (error) { alert("Erro ao excluir"); return; }
+    fetchData();
   };
 
   const addProduction = async (data: any) => {
      if (context.isDemoMode) {
       const newProd = { ...data, id: Math.random().toString(), user_id: 'demo', date: new Date(data.date) };
       setProduction(prev => [newProd, ...prev].sort((a,b) => b.date.getTime() - a.date.getTime()));
-    } else {
-      await addDoc(collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/egg_production`), {
-        ...data,
-        user_id: context.userId,
-        date: Timestamp.fromDate(new Date(data.date))
-      });
+      return;
     }
+    const { error } = await supabaseService.client.from('egg_production').insert([{
+      user_id: context.userId,
+      date: data.date,
+      eggs_produced: data.eggs_produced,
+      feed_consumed_kg: data.feed_consumed_kg
+    }]);
+    if (error) { alert("Erro: " + error.message); return; }
+    fetchData();
   };
 
   const deleteProduction = async (id: string) => {
     if (context.isDemoMode) {
       setProduction(prev => prev.filter(p => p.id !== id));
-    } else {
-      await deleteDoc(doc(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/egg_production`, id));
+      return;
     }
+    await supabaseService.client.from('egg_production').delete().eq('id', id);
+    fetchData();
   };
 
   const addSale = async (data: any) => {
     if (context.isDemoMode) {
      const newSale = { ...data, id: Math.random().toString(), user_id: 'demo', date: new Date(data.date) };
      setSales(prev => [newSale, ...prev].sort((a,b) => b.date.getTime() - a.date.getTime()));
-   } else {
-     await addDoc(collection(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/sales`), {
-       ...data,
-       user_id: context.userId,
-       date: Timestamp.fromDate(new Date(data.date))
-     });
+     return;
    }
+   const { error } = await supabaseService.client.from('sales').insert([{
+     user_id: context.userId,
+     date: data.date,
+     quantity: data.quantity,
+     value: data.value,
+     client: data.client
+   }]);
+   if (error) { alert("Erro: " + error.message); return; }
+   fetchData();
  };
 
  const deleteSale = async (id: string) => {
    if (context.isDemoMode) {
      setSales(prev => prev.filter(p => p.id !== id));
-   } else {
-     await deleteDoc(doc(context.db, `artifacts/${firebaseService.appId}/users/${context.userId}/sales`, id));
+     return;
    }
+   await supabaseService.client.from('sales').delete().eq('id', id);
+   fetchData();
  };
 
-  // --- LOGIN SCREEN ---
+  const handleSaveConfig = () => {
+    try {
+      supabaseService.saveConfig(configJson);
+      setShowConfigModal(false);
+    } catch(e: any) {
+      alert(e.message);
+    }
+  };
+
+  // --- RENDER ---
+
   if (!context.userId) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
@@ -265,27 +241,25 @@ export default function App() {
                 <Egg className="w-12 h-12 text-emerald-600" />
               </div>
             </div>
-            <h1 className="text-3xl font-bold text-gray-900">OvoApp</h1>
+            <h1 className="text-3xl font-bold text-gray-900">OvoApp (Supabase)</h1>
             <p className="text-gray-500">Gestão profissional para sua produção.</p>
           </div>
 
-          {!firebaseService.isConfigured ? (
-             /* NO CONFIG STATE */
-             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
-               <AlertCircle className="w-8 h-8 text-yellow-600 mx-auto mb-2" />
-               <h3 className="text-yellow-800 font-semibold mb-1">Configuração Necessária</h3>
-               <p className="text-yellow-700 text-sm mb-4">
-                 O banco de dados não foi detectado. O login real não funcionará.
+          {!supabaseService.isConfigured ? (
+             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+               <Database className="w-8 h-8 text-blue-600 mx-auto mb-2" />
+               <h3 className="text-blue-800 font-semibold mb-1">Conectar ao Supabase</h3>
+               <p className="text-blue-700 text-sm mb-4">
+                 Configure sua URL e Chave Pública (Anon Key) para começar.
                </p>
-               <Button onClick={handleDemoAccess} className="w-full">
-                 Acessar Modo Demo (Offline)
+               <Button onClick={() => setShowConfigModal(true)} className="w-full bg-blue-600 hover:bg-blue-700 mb-2">
+                 Configurar Supabase
                </Button>
-               <p className="mt-4 text-xs text-gray-400">
-                 Dica: Configure o firebase no código ou localstorage.
-               </p>
+               <Button onClick={() => setContext(prev => ({...prev, isDemoMode: true, userId: 'demo'}))} variant="secondary" className="w-full">
+                 Modo Demo (Offline)
+               </Button>
              </div>
           ) : (
-            /* LOGIN FORM */
             <form onSubmit={handleAuthSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">E-mail</label>
@@ -320,7 +294,7 @@ export default function App() {
 
               <Button type="submit" className="w-full py-2.5" isLoading={loading}>
                  {isRegistering ? (
-                   <><UserPlus className="w-4 h-4 mr-2" /> Criar Conta</>
+                   <><UserPlus className="w-4 h-4 mr-2" /> Cadastrar</>
                  ) : (
                    <><LogIn className="w-4 h-4 mr-2" /> Entrar</>
                  )}
@@ -329,10 +303,10 @@ export default function App() {
               <div className="flex items-center justify-between text-sm mt-4">
                 <button 
                   type="button" 
-                  onClick={() => handleDemoAccess()}
-                  className="text-gray-500 hover:text-gray-700 underline"
+                  onClick={() => setShowConfigModal(true)}
+                  className="text-gray-400 hover:text-gray-600 text-xs flex items-center"
                 >
-                  Entrar sem conta (Demo)
+                  <Settings className="w-3 h-3 mr-1" /> Config
                 </button>
                 <button 
                   type="button"
@@ -348,11 +322,27 @@ export default function App() {
             </form>
           )}
         </div>
+
+        {/* Config Modal */}
+        <Modal isOpen={showConfigModal} onClose={() => setShowConfigModal(false)} title="Configuração Supabase">
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">Copie as credenciais do seu projeto Supabase (Project Settings > API).</p>
+            <textarea
+              className="w-full h-32 p-2 border rounded text-xs font-mono bg-gray-50"
+              placeholder='{"url": "https://...", "key": "eyJ..."}'
+              value={configJson}
+              onChange={(e) => setConfigJson(e.target.value)}
+            />
+             <div className="flex justify-end gap-2">
+               <Button variant="secondary" onClick={() => setShowConfigModal(false)}>Cancelar</Button>
+               <Button onClick={handleSaveConfig}>Salvar</Button>
+             </div>
+          </div>
+        </Modal>
       </div>
     );
   }
 
-  // --- MAIN APP ---
   return (
     <Layout 
       view={view} 
@@ -363,7 +353,7 @@ export default function App() {
     >
       <div className="flex justify-end mb-4 md:hidden">
          {!context.isDemoMode && (
-           <button onClick={handleResetConfig} className="text-xs text-gray-400 hover:text-red-500 flex items-center">
+           <button onClick={() => supabaseService.resetConfig()} className="text-xs text-gray-400 hover:text-red-500 flex items-center">
              <Settings className="w-3 h-3 mr-1" /> Reset DB
            </button>
          )}

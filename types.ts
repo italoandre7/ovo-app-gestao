@@ -1,18 +1,16 @@
-import { Timestamp } from 'firebase/firestore';
-
 export interface Expense {
   id: string;
   user_id: string;
   type: 'Ração' | 'Medicamento' | 'Outro';
   description: string;
   cost: number;
-  date: Timestamp | Date; // Allow both for Mock/Firebase compatibility
+  date: Date; // Supabase retorna strings, mas converteremos para Date no frontend
 }
 
 export interface Production {
   id: string;
   user_id: string;
-  date: Timestamp | Date;
+  date: Date;
   eggs_produced: number;
   feed_consumed_kg: number;
 }
@@ -20,7 +18,7 @@ export interface Production {
 export interface Sale {
   id: string;
   user_id: string;
-  date: Timestamp | Date;
+  date: Date;
   quantity: number;
   value: number;
   client?: string;
@@ -29,8 +27,7 @@ export interface Sale {
 export type ViewState = 'dashboard' | 'expenses' | 'production' | 'sales';
 
 export interface AppContextType {
-  db: any;
-  auth: any;
+  client: any; // SupabaseClient
   userId: string | null;
   isAuthReady: boolean;
   isDemoMode: boolean;
